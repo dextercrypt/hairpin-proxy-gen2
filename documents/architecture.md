@@ -2,80 +2,97 @@
 
 ## Problem
 
-In Kubernetes, when a Pod tries to reach its own domain (e.g. `app.example.com`),
-DNS resolves to the external IP of the LoadBalancer or Ingress. Most cloud
-load-balancers do **not** support hairpin NAT, so the connection from inside the
-cluster to the external IP is dropped or routed out and back in incorrectly.
+In Kubernetes, when a Pod tries to reach its own public hostname (e.g. `app.example.com`), DNS resolves to the external LoadBalancer IP. Most cloud load-balancers do not support hairpin NAT, so the connection is dropped or loops back incorrectly.
 
-This is especially painful for:
-- **cert-manager HTTP-01 challenges** — the ACME solver pod must reach
-  `http://<your-domain>/.well-known/acme-challenge/...`, but that loops through
-  the external LB and fails.
+This breaks:
+- **cert-manager HTTP-01 challenges** — the ACME solver pod must reach `http://<domain>/.well-known/acme-challenge/...` from inside the cluster, which fails via the external LB.
 - Any workload that calls its own public hostname from inside the cluster.
 
 ## Solution
 
 ```
-Pod → DNS lookup → CoreDNS rewrites hostname → hairpin-proxy Service IP
-hairpin-proxy (HAProxy) → forwards TCP to Ingress Controller / API Gateway
-Ingress Controller → routes request normally
+Pod → DNS lookup → CoreDNS rewrites hostname → haproxy-{ingress|gateway} Service IP
+HAProxy → forwards TCP to your Ingress controller or Gateway API controller
+Controller → routes request normally
 ```
-
-Two components:
-
-| Component | What it does |
-|-----------|-------------|
-| **controller** | Polls Kubernetes, collects hostnames from Ingress + Gateway API, injects `rewrite name` rules into the CoreDNS ConfigMap |
-| **haproxy** | TCP proxy listening on `:80` and `:443`. Forwards to your ingress controller or API Gateway service |
 
 ## Components
 
-### Controller (Go)
+| Component | Deployment | Role |
+|-----------|------------|------|
+| `controller` | Deployment (1 replica) | Polls Kubernetes every 15s, collects hostnames, patches CoreDNS ConfigMap |
+| `haproxy-ingress` | Deployment + ClusterIP Service | TCP proxy → your Ingress controller (ingress-nginx, Traefik, etc.) |
+| `haproxy-gateway` | Deployment + ClusterIP Service | TCP proxy → your Gateway API controller (Envoy Gateway, Istio, etc.) |
 
-- Runs as a single-replica `Deployment` in the `hairpin-proxy` namespace.
-- Polls every 15 seconds (configurable via `--poll-interval`).
-- Collects hostnames from:
-  - `networking.k8s.io/v1` **Ingress** — TLS hosts + rule hosts
-  - `gateway.networking.k8s.io/v1` **Gateway** — listener hostnames
-  - `gateway.networking.k8s.io/v1` **HTTPRoute** — spec.hostnames
-  - `gateway.networking.k8s.io/v1` **GRPCRoute** — spec.hostnames
-  - `gateway.networking.k8s.io/v1alpha2` **TLSRoute** — spec.hostnames
-- Rewrites the CoreDNS `Corefile` ConfigMap idempotently.
-- Wildcard hostnames (`*.example.com`) are skipped — they require DNS-01 challenges
-  and can't be expressed as simple CoreDNS name rewrites.
-
-### HAProxy
-
-- Runs as a `Deployment` with a `ClusterIP` Service named `hairpin-proxy`
-  in the `hairpin-proxy` namespace.
-- Full FQDN: `hairpin-proxy.hairpin-proxy.svc.cluster.local`
-- TCP mode (no TLS termination) — preserves original traffic.
-- `send-proxy` directive passes PROXY protocol header to the upstream so it can
-  log the correct client IP.
-- `TARGET_SERVER` env var points to your ingress/gateway Service.
-
-## CoreDNS rewrite format
-
-Each managed line looks like:
-
-```
-    rewrite name app.example.com hairpin-proxy.hairpin-proxy.svc.cluster.local # managed-by hairpin-proxy
-```
-
-The comment suffix `# managed-by hairpin-proxy` is used to identify and clean up
-stale rules on every reconciliation pass, making the operation fully idempotent.
+All components live in the `hairpin-proxy-gen2` namespace.
 
 ## Modes
 
-| Mode | Flag | Intended for |
-|------|------|-------------|
-| CoreDNS | _(default)_ | Single Deployment per cluster — updates CoreDNS ConfigMap |
-| /etc/hosts | `--etc-hosts /path` | DaemonSet — patches each Node's `/etc/hosts` (covers kubelet + container runtime) |
+The controller supports three modes via the `--mode` flag:
+
+| Mode | Watches | HAProxy deployed |
+|------|---------|-----------------|
+| `ingress` | `networking.k8s.io/v1` Ingress | `haproxy-ingress` only |
+| `gateway` | Gateway, HTTPRoute, GRPCRoute, TLSRoute | `haproxy-gateway` only |
+| `both` | All of the above | Both HAProxy deployments |
+
+Each hostname is tagged with its source (`ingress` or `gateway`). CoreDNS rewrites route each hostname to the correct HAProxy backend.
+
+## Controller
+
+- Single-replica `Deployment` in `hairpin-proxy-gen2`.
+- Polls every 15 seconds (configurable via `--poll-interval`).
+- Collects hostnames from:
+  - `networking.k8s.io/v1` **Ingress** — `spec.tls[].hosts` and `spec.rules[].host`
+  - `gateway.networking.k8s.io/v1` **Gateway** — `spec.listeners[].hostname`
+  - `gateway.networking.k8s.io/v1` **HTTPRoute** — `spec.hostnames[]`
+  - `gateway.networking.k8s.io/v1` **GRPCRoute** — `spec.hostnames[]`
+  - `gateway.networking.k8s.io/v1alpha2` **TLSRoute** — `spec.hostnames[]`
+- Wildcard hostnames (`*.example.com`) are skipped — not supported by CoreDNS `rewrite name`.
+- If Gateway API CRDs are not installed, the controller warns and continues — no crash.
+- Gateway API source wins over Ingress on hostname conflict.
+
+## HAProxy
+
+- TCP mode — no TLS termination, traffic is forwarded as-is.
+- `send-proxy` directive passes the PROXY protocol header upstream for correct client IP logging.
+- `TARGET_SERVER` env var is set at deploy time to point to your ingress/gateway Service.
+- Two independent deployments (`haproxy-ingress`, `haproxy-gateway`) allow each to target a different upstream.
+
+FQDNs used as CoreDNS rewrite targets:
+- `haproxy-ingress.hairpin-proxy-gen2.svc.cluster.local`
+- `haproxy-gateway.hairpin-proxy-gen2.svc.cluster.local`
+
+## CoreDNS rewrite format
+
+Managed lines are injected immediately after `.:53 {` in the Corefile:
+
+```
+.:53 {
+    rewrite name app.example.com haproxy-gateway.hairpin-proxy-gen2.svc.cluster.local # managed-by: hairpin-proxy-gen2 | do-not-modify
+    rewrite name legacy.example.com haproxy-ingress.hairpin-proxy-gen2.svc.cluster.local # managed-by: hairpin-proxy-gen2 | do-not-modify
+    errors
+    health
+    ...
+}
+```
+
+On every reconciliation, all managed lines are stripped and re-injected from the current state of Kubernetes resources. The ConfigMap is only updated if the content actually changed.
 
 ## RBAC
 
-The controller needs:
-- `ClusterRole`: list/watch `ingresses`, `gateways`, `httproutes`, `grpcroutes`, `tlsroutes`
-- `Role` in `kube-system`: get/update the `coredns` ConfigMap
+| Resource | Scope | Permissions |
+|----------|-------|-------------|
+| Ingress (`networking.k8s.io`) | ClusterRole | get, list, watch |
+| Gateway API resources | ClusterRole | get, list, watch |
+| `coredns` ConfigMap in `kube-system` | Role (namespaced) | get, update, watch |
 
-See `deploy.yml` for the full manifest.
+RBAC is scoped to the mode — `install-ingress.yaml` does not grant Gateway API permissions, and `install-gateway.yaml` does not grant Ingress permissions.
+
+## Install manifests
+
+| File | Mode | HAProxy deployments |
+|------|------|---------------------|
+| `install-gateway.yaml` | `--mode=gateway` | `haproxy-gateway` |
+| `install-ingress.yaml` | `--mode=ingress` | `haproxy-ingress` |
+| `install-both.yaml` | `--mode=both` | Both |
