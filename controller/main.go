@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,8 +19,15 @@ func main() {
 	var (
 		pollInterval = flag.Duration("poll-interval", 15*time.Second, "How often to poll Kubernetes resources")
 		etchostsPath = flag.String("etc-hosts", "", "Path to writable /etc/hosts file (enables DaemonSet/node mode)")
+		modeFlag     = flag.String("mode", "both", "Which resources to watch: envoy (Gateway API only), nginx (Ingress only), both")
 	)
 	flag.Parse()
+
+	mode, err := ParseMode(*modeFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid --mode %q: must be envoy, nginx, or both\n", *modeFlag)
+		os.Exit(1)
+	}
 
 	logger, err := zap.NewProduction()
 	if err != nil {
@@ -42,7 +50,7 @@ func main() {
 		logger.Fatal("Failed to create Gateway API client", zap.Error(err))
 	}
 
-	collector := NewHostnameCollector(k8sClient, gwClient, logger)
+	collector := NewHostnameCollector(k8sClient, gwClient, mode, logger)
 
 	var updater Updater
 	if *etchostsPath != "" {
@@ -57,6 +65,7 @@ func main() {
 	logger.Info("hairpin-proxy-gen2",
 		zap.String("author", "@dextercrypt"),
 		zap.String("github", "https://github.com/dextercrypt"),
+		zap.String("mode", string(mode)),
 	)
 	logger.Info("Starting reconciliation loop", zap.Duration("poll_interval", *pollInterval))
 

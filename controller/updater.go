@@ -137,13 +137,24 @@ func NewEtcHostsUpdater(path string, logger *zap.Logger) *EtcHostsUpdater {
 }
 
 func (u *EtcHostsUpdater) Update(ctx context.Context, entries []HostnameEntry) error {
-	ingressIPs, err := net.LookupHost(dnsRewriteDestIngress)
-	if err != nil || len(ingressIPs) == 0 {
-		return fmt.Errorf("resolve %s: %w", dnsRewriteDestIngress, err)
-	}
-	gatewayIPs, err := net.LookupHost(dnsRewriteDestGateway)
-	if err != nil || len(gatewayIPs) == 0 {
-		return fmt.Errorf("resolve %s: %w", dnsRewriteDestGateway, err)
+	// Only resolve backends that have entries — avoids DNS failures for
+	// services that aren't deployed (e.g. mode=envoy has no haproxy-nginx).
+	var ingressIP, gatewayIP string
+	for _, e := range entries {
+		if e.Source == SourceIngress && ingressIP == "" {
+			ips, err := net.LookupHost(dnsRewriteDestIngress)
+			if err != nil || len(ips) == 0 {
+				return fmt.Errorf("resolve %s: %w", dnsRewriteDestIngress, err)
+			}
+			ingressIP = ips[0]
+		}
+		if e.Source == SourceGateway && gatewayIP == "" {
+			ips, err := net.LookupHost(dnsRewriteDestGateway)
+			if err != nil || len(ips) == 0 {
+				return fmt.Errorf("resolve %s: %w", dnsRewriteDestGateway, err)
+			}
+			gatewayIP = ips[0]
+		}
 	}
 
 	data, err := os.ReadFile(u.path)
@@ -152,7 +163,7 @@ func (u *EtcHostsUpdater) Update(ctx context.Context, entries []HostnameEntry) e
 	}
 
 	oldContent := string(data)
-	newContent := etchostsWithRewrites(oldContent, entries, ingressIPs[0], gatewayIPs[0])
+	newContent := etchostsWithRewrites(oldContent, entries, ingressIP, gatewayIP)
 
 	if strings.TrimSpace(oldContent) == strings.TrimSpace(newContent) {
 		u.logger.Info("/etc/hosts is already up-to-date, no changes needed")

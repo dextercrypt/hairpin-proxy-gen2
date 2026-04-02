@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -24,6 +25,25 @@ const (
 	SourceGateway Source = "gateway"
 )
 
+// Mode controls which resource types the controller watches.
+type Mode string
+
+const (
+	ModeEnvoy Mode = "envoy" // Gateway API resources only → haproxy-envoy
+	ModeNginx Mode = "nginx" // Ingress resources only    → haproxy-nginx
+	ModeBoth  Mode = "both"  // All resources             → routed by source
+)
+
+// ParseMode validates and returns a Mode from a string.
+func ParseMode(s string) (Mode, error) {
+	switch Mode(s) {
+	case ModeEnvoy, ModeNginx, ModeBoth:
+		return Mode(s), nil
+	default:
+		return "", fmt.Errorf("unknown mode %q", s)
+	}
+}
+
 // HostnameEntry pairs a hostname with the source it was collected from.
 type HostnameEntry struct {
 	Hostname string
@@ -35,11 +55,12 @@ type HostnameEntry struct {
 type HostnameCollector struct {
 	k8s    kubernetes.Interface
 	gw     gatewayclientset.Interface
+	mode   Mode
 	logger *zap.Logger
 }
 
-func NewHostnameCollector(k8s kubernetes.Interface, gw gatewayclientset.Interface, logger *zap.Logger) *HostnameCollector {
-	return &HostnameCollector{k8s: k8s, gw: gw, logger: logger}
+func NewHostnameCollector(k8s kubernetes.Interface, gw gatewayclientset.Interface, mode Mode, logger *zap.Logger) *HostnameCollector {
+	return &HostnameCollector{k8s: k8s, gw: gw, mode: mode, logger: logger}
 }
 
 // CollectHostnames returns a deduplicated, sorted slice of HostnameEntry.
@@ -49,24 +70,25 @@ func (c *HostnameCollector) CollectHostnames(ctx context.Context) ([]HostnameEnt
 	hostMap := make(map[string]Source)
 
 	// Ingress collected first — Gateway API will overwrite on conflict (Gateway wins).
-	if err := c.collectFromIngress(ctx, hostMap); err != nil {
-		c.logger.Warn("Could not list Ingress resources (skipping)", zap.Error(err))
+	if c.mode == ModeNginx || c.mode == ModeBoth {
+		if err := c.collectFromIngress(ctx, hostMap); err != nil {
+			c.logger.Warn("Could not list Ingress resources (skipping)", zap.Error(err))
+		}
 	}
 
-	if err := c.collectFromGateways(ctx, hostMap); err != nil {
-		c.logger.Warn("Could not list Gateway resources (CRD may not be installed, skipping)", zap.Error(err))
-	}
-
-	if err := c.collectFromHTTPRoutes(ctx, hostMap); err != nil {
-		c.logger.Warn("Could not list HTTPRoute resources (CRD may not be installed, skipping)", zap.Error(err))
-	}
-
-	if err := c.collectFromGRPCRoutes(ctx, hostMap); err != nil {
-		c.logger.Warn("Could not list GRPCRoute resources (CRD may not be installed, skipping)", zap.Error(err))
-	}
-
-	if err := c.collectFromTLSRoutes(ctx, hostMap); err != nil {
-		c.logger.Warn("Could not list TLSRoute resources (CRD may not be installed, skipping)", zap.Error(err))
+	if c.mode == ModeEnvoy || c.mode == ModeBoth {
+		if err := c.collectFromGateways(ctx, hostMap); err != nil {
+			c.logger.Warn("Could not list Gateway resources (CRD may not be installed, skipping)", zap.Error(err))
+		}
+		if err := c.collectFromHTTPRoutes(ctx, hostMap); err != nil {
+			c.logger.Warn("Could not list HTTPRoute resources (CRD may not be installed, skipping)", zap.Error(err))
+		}
+		if err := c.collectFromGRPCRoutes(ctx, hostMap); err != nil {
+			c.logger.Warn("Could not list GRPCRoute resources (CRD may not be installed, skipping)", zap.Error(err))
+		}
+		if err := c.collectFromTLSRoutes(ctx, hostMap); err != nil {
+			c.logger.Warn("Could not list TLSRoute resources (CRD may not be installed, skipping)", zap.Error(err))
+		}
 	}
 
 	entries := make([]HostnameEntry, 0, len(hostMap))

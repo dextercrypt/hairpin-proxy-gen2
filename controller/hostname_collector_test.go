@@ -15,6 +15,10 @@ import (
 )
 
 func newTestCollector(objs ...interface{}) *HostnameCollector {
+	return newTestCollectorWithMode(ModeBoth, objs...)
+}
+
+func newTestCollectorWithMode(mode Mode, objs ...interface{}) *HostnameCollector {
 	logger := zap.NewNop()
 	k8sClient := k8sfake.NewSimpleClientset()
 	gwClient := gatewayfake.NewSimpleClientset()
@@ -34,7 +38,7 @@ func newTestCollector(objs ...interface{}) *HostnameCollector {
 		}
 	}
 
-	return NewHostnameCollector(k8sClient, gwClient, logger)
+	return NewHostnameCollector(k8sClient, gwClient, mode, logger)
 }
 
 // helpers
@@ -267,5 +271,95 @@ func TestCollect_Empty(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Errorf("expected no entries, got %v", entries)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Mode filtering
+// ---------------------------------------------------------------------------
+
+func TestCollect_ModeEnvoy_SkipsIngress(t *testing.T) {
+	ing := &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "myapp", Namespace: "default"},
+		Spec: networkingv1.IngressSpec{
+			TLS: []networkingv1.IngressTLS{{Hosts: []string{"legacy.example.com"}}},
+		},
+	}
+	route := &gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "myroute", Namespace: "default"},
+		Spec: gatewayv1.HTTPRouteSpec{
+			Hostnames: []gatewayv1.Hostname{"app.example.com"},
+		},
+	}
+	entries, err := newTestCollectorWithMode(ModeEnvoy, ing, route).CollectHostnames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNotPresent(t, entries, "legacy.example.com")
+	assertEntry(t, entries, "app.example.com", SourceGateway)
+}
+
+func TestCollect_ModeNginx_SkipsGatewayAPI(t *testing.T) {
+	ing := &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "myapp", Namespace: "default"},
+		Spec: networkingv1.IngressSpec{
+			TLS: []networkingv1.IngressTLS{{Hosts: []string{"legacy.example.com"}}},
+		},
+	}
+	route := &gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "myroute", Namespace: "default"},
+		Spec: gatewayv1.HTTPRouteSpec{
+			Hostnames: []gatewayv1.Hostname{"app.example.com"},
+		},
+	}
+	entries, err := newTestCollectorWithMode(ModeNginx, ing, route).CollectHostnames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, entries, "legacy.example.com", SourceIngress)
+	assertNotPresent(t, entries, "app.example.com")
+}
+
+func TestCollect_ModeBoth_CollectsAll(t *testing.T) {
+	ing := &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "myapp", Namespace: "default"},
+		Spec: networkingv1.IngressSpec{
+			TLS: []networkingv1.IngressTLS{{Hosts: []string{"legacy.example.com"}}},
+		},
+	}
+	route := &gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "myroute", Namespace: "default"},
+		Spec: gatewayv1.HTTPRouteSpec{
+			Hostnames: []gatewayv1.Hostname{"app.example.com"},
+		},
+	}
+	entries, err := newTestCollectorWithMode(ModeBoth, ing, route).CollectHostnames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, entries, "legacy.example.com", SourceIngress)
+	assertEntry(t, entries, "app.example.com", SourceGateway)
+}
+
+func TestParseMode_Valid(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"envoy", "envoy"},
+		{"nginx", "nginx"},
+		{"both", "both"},
+	} {
+		m, err := ParseMode(tc.in)
+		if err != nil {
+			t.Errorf("ParseMode(%q) unexpected error: %v", tc.in, err)
+		}
+		if string(m) != tc.want {
+			t.Errorf("ParseMode(%q) = %q, want %q", tc.in, m, tc.want)
+		}
+	}
+}
+
+func TestParseMode_Invalid(t *testing.T) {
+	_, err := ParseMode("unknown")
+	if err == nil {
+		t.Error("expected error for invalid mode, got nil")
 	}
 }
