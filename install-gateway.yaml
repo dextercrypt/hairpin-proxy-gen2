@@ -1,0 +1,173 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hairpin-proxy-gen2
+
+---
+# ---------------------------------------------------------------------------
+# HAProxy — Envoy Gateway backend (Gateway API traffic only)
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: haproxy-envoy
+  namespace: hairpin-proxy-gen2
+  labels:
+    app: haproxy-envoy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: haproxy-envoy
+  template:
+    metadata:
+      labels:
+        app: haproxy-envoy
+    spec:
+      containers:
+        - name: haproxy
+          image: dextercrypt/hairpin-proxy-gen2-haproxy:v0.0.1
+          env:
+            - name: TARGET_SERVER
+              value: envoy-gateway.envoy-gateway-system.svc.cluster.local
+          ports:
+            - containerPort: 80
+            - containerPort: 443
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "10m"
+            limits:
+              memory: "128Mi"
+              cpu: "50m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: haproxy-envoy
+  namespace: hairpin-proxy-gen2
+spec:
+  selector:
+    app: haproxy-envoy
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 80
+    - name: https
+      protocol: TCP
+      port: 443
+      targetPort: 443
+
+---
+# ---------------------------------------------------------------------------
+# Controller
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: controller
+  namespace: hairpin-proxy-gen2
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hairpin-proxy-gen2
+rules:
+  - apiGroups:
+      - gateway.networking.k8s.io
+    resources:
+      - gateways
+      - httproutes
+      - grpcroutes
+      - tlsroutes
+    verbs:
+      - get
+      - list
+      - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hairpin-proxy-gen2
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hairpin-proxy-gen2
+subjects:
+  - kind: ServiceAccount
+    name: controller
+    namespace: hairpin-proxy-gen2
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hairpin-proxy-gen2-coredns
+  namespace: kube-system
+rules:
+  - apiGroups: [""]
+    resources:
+      - configmaps
+    resourceNames:
+      - coredns
+    verbs:
+      - get
+      - update
+      - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hairpin-proxy-gen2-coredns
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: hairpin-proxy-gen2-coredns
+subjects:
+  - kind: ServiceAccount
+    name: controller
+    namespace: hairpin-proxy-gen2
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller
+  namespace: hairpin-proxy-gen2
+  labels:
+    app: controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: controller
+  template:
+    metadata:
+      labels:
+        app: controller
+    spec:
+      serviceAccountName: controller
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+      containers:
+        - name: controller
+          image: dextercrypt/hairpin-proxy-gen2-controller:v0.0.1
+          args:
+            - --poll-interval=15s
+            - --mode=gateway
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "10m"
+            limits:
+              memory: "64Mi"
+              cpu: "50m"

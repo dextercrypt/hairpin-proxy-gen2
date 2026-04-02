@@ -1,3 +1,4 @@
 controller/controller
+controller/hairpin-proxy-gen2
 *.test
 *.out

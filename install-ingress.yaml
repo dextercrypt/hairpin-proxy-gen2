@@ -6,32 +6,31 @@ metadata:
 
 ---
 # ---------------------------------------------------------------------------
-# HAProxy — TCP proxy that forwards port 80/443 to your ingress/gateway
+# HAProxy — ingress-nginx backend (Ingress traffic only)
 # ---------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: haproxy
+  name: haproxy-nginx
   namespace: hairpin-proxy-gen2
   labels:
-    app: haproxy
+    app: haproxy-nginx
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: haproxy
+      app: haproxy-nginx
   template:
     metadata:
       labels:
-        app: haproxy
+        app: haproxy-nginx
     spec:
       containers:
         - name: haproxy
           image: dextercrypt/hairpin-proxy-gen2-haproxy:v0.0.1
-          # Override TARGET_SERVER if your ingress/gateway service lives elsewhere.
           env:
             - name: TARGET_SERVER
-              value: envoy-gateway.envoy-gateway-system.svc.cluster.local
+              value: ingress-nginx-controller.ingress-nginx.svc.cluster.local
           ports:
             - containerPort: 80
             - containerPort: 443
@@ -47,11 +46,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: haproxy
+  name: haproxy-nginx
   namespace: hairpin-proxy-gen2
 spec:
   selector:
-    app: haproxy
+    app: haproxy-nginx
   ports:
     - name: http
       protocol: TCP
@@ -64,7 +63,7 @@ spec:
 
 ---
 # ---------------------------------------------------------------------------
-# Controller — watches resources and rewrites CoreDNS
+# Controller
 # ---------------------------------------------------------------------------
 apiVersion: v1
 kind: ServiceAccount
@@ -73,29 +72,15 @@ metadata:
   namespace: hairpin-proxy-gen2
 
 ---
-# Reads Ingress and Gateway API resources cluster-wide
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: hairpin-proxy-gen2
 rules:
-  # Ingress
   - apiGroups:
       - networking.k8s.io
     resources:
       - ingresses
-    verbs:
-      - get
-      - list
-      - watch
-  # Gateway API
-  - apiGroups:
-      - gateway.networking.k8s.io
-    resources:
-      - gateways
-      - httproutes
-      - grpcroutes
-      - tlsroutes
     verbs:
       - get
       - list
@@ -116,7 +101,6 @@ subjects:
     namespace: hairpin-proxy-gen2
 
 ---
-# Reads and updates the CoreDNS ConfigMap in kube-system
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -176,6 +160,7 @@ spec:
           image: dextercrypt/hairpin-proxy-gen2-controller:v0.0.1
           args:
             - --poll-interval=15s
+            - --mode=ingress
           resources:
             requests:
               memory: "32Mi"

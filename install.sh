@@ -96,68 +96,123 @@ check_cmd curl
 confirm "Preflight looks good — proceed to configuration?"
 
 # ---------------------------------------------------------------------------
-# Step 2 — TARGET_SERVER prompt
+# Step 2 — Mode selection
 # ---------------------------------------------------------------------------
-DEFAULT_TARGET="envoy-gateway.envoy-gateway-system.svc.cluster.local"
+echo -e "  ${BOLD_YELLOW}❯ Step 2 — Select Mode${RESET}"
+echo ""
+echo -e "  ${DIM}Choose which resources hairpin-proxy-gen2 should watch:${RESET}"
+echo ""
+echo -e "  ${BOLD_WHITE}  1)${RESET} ${CYAN}gateway${RESET}  ${DIM}— Gateway API only  (HTTPRoute, GRPCRoute, TLSRoute, Gateway listeners)${RESET}"
+echo -e "  ${BOLD_WHITE}  2)${RESET} ${CYAN}ingress${RESET}  ${DIM}— Ingress only       (networking.k8s.io/v1 Ingress resources)${RESET}"
+echo -e "  ${BOLD_WHITE}  3)${RESET} ${CYAN}both${RESET}     ${DIM}— Dual-stack         (all resources, routed to correct backend by source)${RESET}"
+echo ""
+echo -e -n "  ${BOLD_WHITE}Select mode${RESET} ${DIM}[1/2/3, default: 3]${RESET}${BOLD_WHITE}: ${RESET}"
+read -r MODE_INPUT
 
-echo -e "  ${BOLD_YELLOW}❯ Step 2 — Target Server Configuration${RESET}"
-echo ""
-echo -e "  ${DIM}This is where HAProxy will forward all hairpin traffic.${RESET}"
-echo -e "  ${DIM}It should be the in-cluster FQDN of your ingress controller or API Gateway.${RESET}"
-echo ""
-echo -e "  ${DIM}Examples:${RESET}"
-echo -e "  ${DIM}    Envoy Gateway  →  ${CYAN}envoy-gateway.envoy-gateway-system.svc.cluster.local${RESET}"
-echo -e "  ${DIM}    ingress-nginx  →  ${CYAN}ingress-nginx-controller.ingress-nginx.svc.cluster.local${RESET}"
-echo -e "  ${DIM}    Traefik        →  ${CYAN}traefik.traefik.svc.cluster.local${RESET}"
-echo -e "  ${DIM}    Kong           →  ${CYAN}kong-proxy.kong.svc.cluster.local${RESET}"
-echo ""
-echo -e -n "  ${BOLD_WHITE}Target Server${RESET} ${DIM}[default: ${CYAN}${DEFAULT_TARGET}${RESET}${DIM}]${RESET}${BOLD_WHITE}: ${RESET}"
-read -r TARGET_INPUT
+case "$MODE_INPUT" in
+  1) MODE="gateway" ;;
+  2) MODE="ingress" ;;
+  *)  MODE="both" ;;
+esac
 
-if [[ -z "$TARGET_INPUT" ]]; then
-  TARGET_SERVER="$DEFAULT_TARGET"
-  echo -e "\n  ${DIM}No input — using default:${RESET} ${CYAN}${TARGET_SERVER}${RESET}"
-else
-  TARGET_SERVER="$TARGET_INPUT"
-  echo -e "\n  ${GREEN}✔${RESET}  Using: ${CYAN}${TARGET_SERVER}${RESET}"
+echo -e "\n  ${GREEN}✔${RESET}  Mode: ${CYAN}${MODE}${RESET}"
+
+confirm "Mode set to ${CYAN}${MODE}${RESET}${BOLD_WHITE} — proceed to target configuration?"
+
+# ---------------------------------------------------------------------------
+# Step 3 — Target server(s) based on mode
+# ---------------------------------------------------------------------------
+GATEWAY_TARGET=""
+INGRESS_TARGET=""
+
+DEFAULT_GATEWAY_TARGET="envoy-gateway.envoy-gateway-system.svc.cluster.local"
+DEFAULT_INGRESS_TARGET="ingress-nginx-controller.ingress-nginx.svc.cluster.local"
+
+if [[ "$MODE" == "gateway" || "$MODE" == "both" ]]; then
+  echo -e "  ${BOLD_YELLOW}❯ Step 3a — Gateway API Target Server${RESET}"
+  echo ""
+  echo -e "  ${DIM}Where HAProxy forwards Gateway API traffic (HTTPRoute, GRPCRoute, etc.)${RESET}"
+  echo ""
+  echo -e "  ${DIM}Examples:${RESET}"
+  echo -e "  ${DIM}    Envoy Gateway  →  ${CYAN}envoy-gateway.envoy-gateway-system.svc.cluster.local${RESET}"
+  echo -e "  ${DIM}    Istio          →  ${CYAN}istio-ingressgateway.istio-system.svc.cluster.local${RESET}"
+  echo -e "  ${DIM}    Cilium         →  ${CYAN}cilium-gateway.kube-system.svc.cluster.local${RESET}"
+  echo ""
+  echo -e -n "  ${BOLD_WHITE}Gateway API Target${RESET} ${DIM}[default: ${CYAN}${DEFAULT_GATEWAY_TARGET}${RESET}${DIM}]${RESET}${BOLD_WHITE}: ${RESET}"
+  read -r GATEWAY_INPUT
+  GATEWAY_TARGET="${GATEWAY_INPUT:-$DEFAULT_GATEWAY_TARGET}"
+  echo -e "\n  ${GREEN}✔${RESET}  Gateway target: ${CYAN}${GATEWAY_TARGET}${RESET}"
+  echo ""
 fi
 
-confirm "Target set to ${CYAN}${TARGET_SERVER}${RESET}${BOLD_WHITE} — proceed to download?"
+if [[ "$MODE" == "ingress" || "$MODE" == "both" ]]; then
+  echo -e "  ${BOLD_YELLOW}❯ Step 3b — Ingress Target Server${RESET}"
+  echo ""
+  echo -e "  ${DIM}Where HAProxy forwards Ingress traffic.${RESET}"
+  echo ""
+  echo -e "  ${DIM}Examples:${RESET}"
+  echo -e "  ${DIM}    ingress-nginx  →  ${CYAN}ingress-nginx-controller.ingress-nginx.svc.cluster.local${RESET}"
+  echo -e "  ${DIM}    Traefik        →  ${CYAN}traefik.traefik.svc.cluster.local${RESET}"
+  echo -e "  ${DIM}    Kong           →  ${CYAN}kong-proxy.kong.svc.cluster.local${RESET}"
+  echo ""
+  echo -e -n "  ${BOLD_WHITE}Ingress Target${RESET} ${DIM}[default: ${CYAN}${DEFAULT_INGRESS_TARGET}${RESET}${DIM}]${RESET}${BOLD_WHITE}: ${RESET}"
+  read -r INGRESS_INPUT
+  INGRESS_TARGET="${INGRESS_INPUT:-$DEFAULT_INGRESS_TARGET}"
+  echo -e "\n  ${GREEN}✔${RESET}  Ingress target: ${CYAN}${INGRESS_TARGET}${RESET}"
+  echo ""
+fi
+
+confirm "Targets configured — proceed to download?"
 
 # ---------------------------------------------------------------------------
-# Step 3 — Download install.yaml
+# Step 4 — Download the correct manifest
 # ---------------------------------------------------------------------------
-INSTALL_YAML_URL="https://raw.githubusercontent.com/dextercrypt/hairpin-proxy-gen2/main/install.yaml"
+BASE_URL="https://raw.githubusercontent.com/dextercrypt/hairpin-proxy-gen2/main"
+MANIFEST_URL="${BASE_URL}/install-${MODE}.yaml"
 TMP_FILE="$(mktemp /tmp/hairpin-proxy-gen2-XXXXXX.yaml)"
 
-echo -e "  ${BOLD_YELLOW}❯ Step 3 — Downloading manifest${RESET}"
+echo -e "  ${BOLD_YELLOW}❯ Step 4 — Downloading manifest${RESET}"
 echo ""
 
-curl -fsSL "$INSTALL_YAML_URL" -o "$TMP_FILE" &
-spinner $! "Pulling install.yaml from GitHub..."
+curl -fsSL "$MANIFEST_URL" -o "$TMP_FILE" &
+spinner $! "Pulling install-${MODE}.yaml from GitHub..."
 
-sed -i.bak "s|envoy-gateway.envoy-gateway-system.svc.cluster.local|${TARGET_SERVER}|g" "$TMP_FILE"
+# Patch targets
+if [[ -n "$GATEWAY_TARGET" ]]; then
+  sed -i.bak "s|envoy-gateway.envoy-gateway-system.svc.cluster.local|${GATEWAY_TARGET}|g" "$TMP_FILE"
+fi
+if [[ -n "$INGRESS_TARGET" ]]; then
+  sed -i.bak "s|ingress-nginx-controller.ingress-nginx.svc.cluster.local|${INGRESS_TARGET}|g" "$TMP_FILE"
+fi
 rm -f "${TMP_FILE}.bak"
 
 confirm "Manifest downloaded and patched — proceed to review summary?"
 
 # ---------------------------------------------------------------------------
-# Step 4 — Summary
+# Step 5 — Summary
 # ---------------------------------------------------------------------------
-echo -e "  ${BOLD_YELLOW}❯ Step 4 — Summary${RESET}"
+echo -e "  ${BOLD_YELLOW}❯ Step 5 — Summary${RESET}"
 echo ""
 echo -e "  ${DIM}  Namespace   :${RESET}  ${WHITE}hairpin-proxy-gen2${RESET}"
-echo -e "  ${DIM}  HAProxy     :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-haproxy:v0.0.1${RESET}"
+echo -e "  ${DIM}  Mode        :${RESET}  ${CYAN}${MODE}${RESET}"
 echo -e "  ${DIM}  Controller  :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-controller:v0.0.1${RESET}"
-echo -e "  ${DIM}  Target      :${RESET}  ${CYAN}${TARGET_SERVER}${RESET}"
+
+if [[ "$MODE" == "gateway" || "$MODE" == "both" ]]; then
+  echo -e "  ${DIM}  HAProxy (Gateway API) :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-haproxy:v0.0.1${RESET}"
+  echo -e "  ${DIM}  Gateway target        :${RESET}  ${CYAN}${GATEWAY_TARGET}${RESET}"
+fi
+if [[ "$MODE" == "ingress" || "$MODE" == "both" ]]; then
+  echo -e "  ${DIM}  HAProxy (Ingress)     :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-haproxy:v0.0.1${RESET}"
+  echo -e "  ${DIM}  Ingress target        :${RESET}  ${CYAN}${INGRESS_TARGET}${RESET}"
+fi
 echo ""
 
 confirm "Everything looks good — apply to cluster now?"
 
 # ---------------------------------------------------------------------------
-# Step 5 — Apply
+# Step 6 — Apply
 # ---------------------------------------------------------------------------
-echo -e "  ${BOLD_YELLOW}❯ Step 5 — Applying to cluster${RESET}"
+echo -e "  ${BOLD_YELLOW}❯ Step 6 — Applying to cluster${RESET}"
 echo ""
 
 kubectl apply -f "$TMP_FILE" &
