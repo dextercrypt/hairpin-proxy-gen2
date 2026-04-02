@@ -245,7 +245,7 @@ spec:
         runAsGroup: 65534
       containers:
         - name: controller
-          image: dextercrypt/hairpin-proxy-gen2-controller:v1.0.1
+          image: dextercrypt/hairpin-proxy-gen2-controller:v1.0.3
           args:
             - --poll-interval=15s
             - --mode=both

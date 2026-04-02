@@ -201,7 +201,7 @@ echo -e "  ${BOLD_YELLOW}❯ Step 5 — Summary${RESET}"
 echo ""
 echo -e "  ${DIM}  Namespace   :${RESET}  ${WHITE}hairpin-proxy-gen2${RESET}"
 echo -e "  ${DIM}  Mode        :${RESET}  ${CYAN}${MODE}${RESET}"
-echo -e "  ${DIM}  Controller  :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-controller:v1.0.1${RESET}"
+echo -e "  ${DIM}  Controller  :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-controller:v1.0.3${RESET}"
 
 if [[ "$MODE" == "gateway" || "$MODE" == "both" ]]; then
   echo -e "  ${DIM}  HAProxy (Gateway API) :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-haproxy:v1.0.3${RESET}"
