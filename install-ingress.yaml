@@ -11,19 +11,19 @@ metadata:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: haproxy-nginx
+  name: haproxy-ingress
   namespace: hairpin-proxy-gen2
   labels:
-    app: haproxy-nginx
+    app: haproxy-ingress
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: haproxy-nginx
+      app: haproxy-ingress
   template:
     metadata:
       labels:
-        app: haproxy-nginx
+        app: haproxy-ingress
     spec:
       containers:
         - name: haproxy
@@ -46,11 +46,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: haproxy-nginx
+  name: haproxy-ingress
   namespace: hairpin-proxy-gen2
 spec:
   selector:
-    app: haproxy-nginx
+    app: haproxy-ingress
   ports:
     - name: http
       protocol: TCP

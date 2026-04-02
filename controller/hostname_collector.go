@@ -29,8 +29,8 @@ const (
 type Mode string
 
 const (
-	ModeGateway Mode = "gateway" // Gateway API resources only → haproxy-envoy
-	ModeIngress Mode = "ingress" // Ingress resources only    → haproxy-nginx
+	ModeGateway Mode = "gateway" // Gateway API resources only → haproxy-gateway
+	ModeIngress Mode = "ingress" // Ingress resources only    → haproxy-ingress
 	ModeBoth    Mode = "both"    // All resources             → routed by source
 )
 

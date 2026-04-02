@@ -18,10 +18,10 @@ const (
 	commentSuffix = "# managed-by: hairpin-proxy-gen2 | do-not-modify"
 
 	// dnsRewriteDestIngress is the HAProxy service that forwards to ingress-nginx.
-	dnsRewriteDestIngress = "haproxy-nginx.hairpin-proxy-gen2.svc.cluster.local"
+	dnsRewriteDestIngress = "haproxy-ingress.hairpin-proxy-gen2.svc.cluster.local"
 
 	// dnsRewriteDestGateway is the HAProxy service that forwards to envoy-gateway.
-	dnsRewriteDestGateway = "haproxy-envoy.hairpin-proxy-gen2.svc.cluster.local"
+	dnsRewriteDestGateway = "haproxy-gateway.hairpin-proxy-gen2.svc.cluster.local"
 
 	corednsNamespace     = "kube-system"
 	corednsConfigMapName = "coredns"
@@ -138,7 +138,7 @@ func NewEtcHostsUpdater(path string, logger *zap.Logger) *EtcHostsUpdater {
 
 func (u *EtcHostsUpdater) Update(ctx context.Context, entries []HostnameEntry) error {
 	// Only resolve backends that have entries — avoids DNS failures for
-	// services that aren't deployed (e.g. mode=envoy has no haproxy-nginx).
+	// services that aren't deployed (e.g. mode=envoy has no haproxy-ingress).
 	var ingressIP, gatewayIP string
 	for _, e := range entries {
 		if e.Source == SourceIngress && ingressIP == "" {
@@ -179,8 +179,8 @@ func (u *EtcHostsUpdater) Update(ctx context.Context, entries []HostnameEntry) e
 }
 
 // etchostsWithRewrites returns /etc/hosts content with two managed lines —
-// one for Ingress hostnames pointing to haproxy-nginx, one for Gateway API
-// hostnames pointing to haproxy-envoy.
+// one for Ingress hostnames pointing to haproxy-ingress, one for Gateway API
+// hostnames pointing to haproxy-gateway.
 func etchostsWithRewrites(original string, entries []HostnameEntry, ingressIP, gatewayIP string) string {
 	lines := strings.Split(strings.TrimSpace(original), "\n")
 

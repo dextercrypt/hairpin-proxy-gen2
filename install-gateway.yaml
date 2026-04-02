@@ -11,19 +11,19 @@ metadata:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: haproxy-envoy
+  name: haproxy-gateway
   namespace: hairpin-proxy-gen2
   labels:
-    app: haproxy-envoy
+    app: haproxy-gateway
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: haproxy-envoy
+      app: haproxy-gateway
   template:
     metadata:
       labels:
-        app: haproxy-envoy
+        app: haproxy-gateway
     spec:
       containers:
         - name: haproxy
@@ -46,11 +46,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: haproxy-envoy
+  name: haproxy-gateway
   namespace: hairpin-proxy-gen2
 spec:
   selector:
-    app: haproxy-envoy
+    app: haproxy-gateway
   ports:
     - name: http
       protocol: TCP
