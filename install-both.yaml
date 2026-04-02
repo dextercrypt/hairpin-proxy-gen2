@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
         - name: haproxy
-          image: dextercrypt/hairpin-proxy-gen2-haproxy:v1.0.1
+          image: dextercrypt/hairpin-proxy-gen2-haproxy:v1.0.2
           env:
             - name: TARGET_SERVER
               value: envoy-gateway.envoy-gateway-system.svc.cluster.local
@@ -94,7 +94,7 @@ spec:
     spec:
       containers:
         - name: haproxy
-          image: dextercrypt/hairpin-proxy-gen2-haproxy:v1.0.1
+          image: dextercrypt/hairpin-proxy-gen2-haproxy:v1.0.2
           env:
             - name: TARGET_SERVER
               value: ingress-nginx-controller.ingress-nginx.svc.cluster.local
