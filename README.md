@@ -237,12 +237,6 @@ hairpin-proxy-gen2 requests the minimum permissions required:
 
 ---
 
-## DaemonSet / node mode
-
-If your kubelet or container runtime bypasses CoreDNS, you can run the controller as a DaemonSet and pass `--etc-hosts=/path/to/node/etc/hosts` to write directly to each node's `/etc/hosts` file. In this mode, the controller writes one line per backend (ingress hosts and gateway hosts separately) instead of patching CoreDNS.
-
----
-
 ## Credits
 
 Built by [@dextercrypt](https://github.com/dextercrypt). Inspired by the original [hairpin-proxy](https://github.com/compumike/hairpin-proxy) by [@compumike](https://github.com/compumike).
