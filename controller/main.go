@@ -83,15 +83,27 @@ func main() {
 func reconcile(ctx context.Context, collector *HostnameCollector, updater Updater, logger *zap.Logger) {
 	logger.Info("Reconciling hostnames from all sources...")
 
-	hosts, err := collector.CollectHostnames(ctx)
+	entries, err := collector.CollectHostnames(ctx)
 	if err != nil {
 		logger.Error("Failed to collect hostnames", zap.Error(err))
 		return
 	}
 
-	logger.Info("Collected unique hostnames", zap.Int("count", len(hosts)), zap.Strings("hosts", hosts))
+	ingressCount, gatewayCount := 0, 0
+	for _, e := range entries {
+		if e.Source == SourceIngress {
+			ingressCount++
+		} else {
+			gatewayCount++
+		}
+	}
+	logger.Info("Collected hostnames",
+		zap.Int("total", len(entries)),
+		zap.Int("ingress", ingressCount),
+		zap.Int("gateway", gatewayCount),
+	)
 
-	if err := updater.Update(ctx, hosts); err != nil {
+	if err := updater.Update(ctx, entries); err != nil {
 		logger.Error("Failed to apply DNS rewrite rules", zap.Error(err))
 	}
 }

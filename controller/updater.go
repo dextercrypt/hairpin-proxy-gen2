@@ -17,19 +17,20 @@ const (
 	// remove them on the next reconciliation pass (idempotent).
 	commentSuffix = "# managed-by: hairpin-proxy-gen2 | do-not-modify"
 
-	// dnsRewriteDest is the in-cluster FQDN of the hairpin-proxy HAProxy Service.
-	// CoreDNS rewrites matching hostnames to this address so pods can reach the
-	// ingress/gateway from inside the cluster.
-	dnsRewriteDest = "haproxy.hairpin-proxy-gen2.svc.cluster.local"
+	// dnsRewriteDestIngress is the HAProxy service that forwards to ingress-nginx.
+	dnsRewriteDestIngress = "haproxy-nginx.hairpin-proxy-gen2.svc.cluster.local"
+
+	// dnsRewriteDestGateway is the HAProxy service that forwards to envoy-gateway.
+	dnsRewriteDestGateway = "haproxy-envoy.hairpin-proxy-gen2.svc.cluster.local"
 
 	corednsNamespace     = "kube-system"
 	corednsConfigMapName = "coredns"
 	corednsConfigMapKey  = "Corefile"
 )
 
-// Updater applies the collected hostname list to a DNS target.
+// Updater applies the collected hostname entries to a DNS target.
 type Updater interface {
-	Update(ctx context.Context, hosts []string) error
+	Update(ctx context.Context, entries []HostnameEntry) error
 }
 
 // ---------------------------------------------------------------------------
@@ -46,14 +47,14 @@ func NewCoreDNSUpdater(k8s kubernetes.Interface, logger *zap.Logger) *CoreDNSUpd
 	return &CoreDNSUpdater{k8s: k8s, logger: logger}
 }
 
-func (u *CoreDNSUpdater) Update(ctx context.Context, hosts []string) error {
+func (u *CoreDNSUpdater) Update(ctx context.Context, entries []HostnameEntry) error {
 	cm, err := u.k8s.CoreV1().ConfigMaps(corednsNamespace).Get(ctx, corednsConfigMapName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("get coredns configmap: %w", err)
 	}
 
 	oldCorefile := cm.Data[corednsConfigMapKey]
-	newCorefile := corefileWithRewrites(oldCorefile, hosts)
+	newCorefile := corefileWithRewrites(oldCorefile, entries)
 
 	if strings.TrimSpace(oldCorefile) == strings.TrimSpace(newCorefile) {
 		u.logger.Info("CoreDNS Corefile is already up-to-date, no changes needed")
@@ -71,8 +72,9 @@ func (u *CoreDNSUpdater) Update(ctx context.Context, hosts []string) error {
 
 // corefileWithRewrites returns the Corefile with all hairpin-proxy rewrite rules
 // injected immediately after the `.:53 {` server block opener.
+// Each entry is routed to the correct HAProxy backend based on its Source.
 // The transformation is idempotent: existing managed lines are removed first.
-func corefileWithRewrites(original string, hosts []string) string {
+func corefileWithRewrites(original string, entries []HostnameEntry) string {
 	lines := strings.Split(strings.TrimSpace(original), "\n")
 
 	// Strip any lines we previously added.
@@ -83,11 +85,15 @@ func corefileWithRewrites(original string, hosts []string) string {
 		}
 	}
 
-	// Build rewrite directives for each hostname.
-	rewrites := make([]string, 0, len(hosts))
-	for _, host := range hosts {
+	// Build rewrite directives — each hostname points to its own HAProxy backend.
+	rewrites := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		dest := dnsRewriteDestIngress
+		if entry.Source == SourceGateway {
+			dest = dnsRewriteDestGateway
+		}
 		rewrites = append(rewrites,
-			fmt.Sprintf("    rewrite name %s %s %s", host, dnsRewriteDest, commentSuffix))
+			fmt.Sprintf("    rewrite name %s %s %s", entry.Hostname, dest, commentSuffix))
 	}
 
 	// Inject after the `.:53 {` line.
@@ -130,10 +136,14 @@ func NewEtcHostsUpdater(path string, logger *zap.Logger) *EtcHostsUpdater {
 	return &EtcHostsUpdater{path: path, logger: logger}
 }
 
-func (u *EtcHostsUpdater) Update(ctx context.Context, hosts []string) error {
-	ips, err := net.LookupHost(dnsRewriteDest)
-	if err != nil || len(ips) == 0 {
-		return fmt.Errorf("resolve %s: %w", dnsRewriteDest, err)
+func (u *EtcHostsUpdater) Update(ctx context.Context, entries []HostnameEntry) error {
+	ingressIPs, err := net.LookupHost(dnsRewriteDestIngress)
+	if err != nil || len(ingressIPs) == 0 {
+		return fmt.Errorf("resolve %s: %w", dnsRewriteDestIngress, err)
+	}
+	gatewayIPs, err := net.LookupHost(dnsRewriteDestGateway)
+	if err != nil || len(gatewayIPs) == 0 {
+		return fmt.Errorf("resolve %s: %w", dnsRewriteDestGateway, err)
 	}
 
 	data, err := os.ReadFile(u.path)
@@ -142,7 +152,7 @@ func (u *EtcHostsUpdater) Update(ctx context.Context, hosts []string) error {
 	}
 
 	oldContent := string(data)
-	newContent := etchostsWithRewrites(oldContent, hosts, ips[0])
+	newContent := etchostsWithRewrites(oldContent, entries, ingressIPs[0], gatewayIPs[0])
 
 	if strings.TrimSpace(oldContent) == strings.TrimSpace(newContent) {
 		u.logger.Info("/etc/hosts is already up-to-date, no changes needed")
@@ -157,12 +167,12 @@ func (u *EtcHostsUpdater) Update(ctx context.Context, hosts []string) error {
 	return nil
 }
 
-// etchostsWithRewrites returns /etc/hosts content with a single managed line
-// mapping all hairpin hosts to the proxy IP.
-func etchostsWithRewrites(original string, hosts []string, ip string) string {
+// etchostsWithRewrites returns /etc/hosts content with two managed lines —
+// one for Ingress hostnames pointing to haproxy-nginx, one for Gateway API
+// hostnames pointing to haproxy-envoy.
+func etchostsWithRewrites(original string, entries []HostnameEntry, ingressIP, gatewayIP string) string {
 	lines := strings.Split(strings.TrimSpace(original), "\n")
 
-	// Remove lines we previously added.
 	var originalLines []string
 	for _, line := range lines {
 		if !strings.HasSuffix(strings.TrimSpace(line), commentSuffix) {
@@ -170,10 +180,22 @@ func etchostsWithRewrites(original string, hosts []string, ip string) string {
 		}
 	}
 
-	if len(hosts) == 0 {
-		return strings.Join(originalLines, "\n") + "\n"
+	var ingressHosts, gatewayHosts []string
+	for _, e := range entries {
+		if e.Source == SourceIngress {
+			ingressHosts = append(ingressHosts, e.Hostname)
+		} else {
+			gatewayHosts = append(gatewayHosts, e.Hostname)
+		}
 	}
 
-	rewriteLine := fmt.Sprintf("%s\t%s %s", ip, strings.Join(hosts, " "), commentSuffix)
-	return strings.Join(append(originalLines, rewriteLine), "\n") + "\n"
+	result := originalLines
+	if len(ingressHosts) > 0 {
+		result = append(result, fmt.Sprintf("%s\t%s %s", ingressIP, strings.Join(ingressHosts, " "), commentSuffix))
+	}
+	if len(gatewayHosts) > 0 {
+		result = append(result, fmt.Sprintf("%s\t%s %s", gatewayIP, strings.Join(gatewayHosts, " "), commentSuffix))
+	}
+
+	return strings.Join(result, "\n") + "\n"
 }

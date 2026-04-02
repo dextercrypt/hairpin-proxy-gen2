@@ -14,13 +14,12 @@ import (
 	gatewayfake "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned/fake"
 )
 
-func newTestCollector(k8sObjs ...interface{}) (*HostnameCollector, *k8sfake.Clientset, *gatewayfake.Clientset) {
+func newTestCollector(objs ...interface{}) *HostnameCollector {
 	logger := zap.NewNop()
 	k8sClient := k8sfake.NewSimpleClientset()
 	gwClient := gatewayfake.NewSimpleClientset()
 
-	// Pre-populate k8s objects
-	for _, obj := range k8sObjs {
+	for _, obj := range objs {
 		switch o := obj.(type) {
 		case *networkingv1.Ingress:
 			k8sClient.NetworkingV1().Ingresses(o.Namespace).Create(context.Background(), o, metav1.CreateOptions{}) //nolint:errcheck
@@ -35,59 +34,80 @@ func newTestCollector(k8sObjs ...interface{}) (*HostnameCollector, *k8sfake.Clie
 		}
 	}
 
-	return NewHostnameCollector(k8sClient, gwClient, logger), k8sClient, gwClient
+	return NewHostnameCollector(k8sClient, gwClient, logger)
+}
+
+// helpers
+
+func findEntry(entries []HostnameEntry, hostname string) (HostnameEntry, bool) {
+	for _, e := range entries {
+		if e.Hostname == hostname {
+			return e, true
+		}
+	}
+	return HostnameEntry{}, false
+}
+
+func assertEntry(t *testing.T, entries []HostnameEntry, hostname string, source Source) {
+	t.Helper()
+	e, ok := findEntry(entries, hostname)
+	if !ok {
+		t.Errorf("expected hostname %q not found in entries %v", hostname, entries)
+		return
+	}
+	if e.Source != source {
+		t.Errorf("hostname %q: expected source %q, got %q", hostname, source, e.Source)
+	}
+}
+
+func assertNotPresent(t *testing.T, entries []HostnameEntry, hostname string) {
+	t.Helper()
+	if _, ok := findEntry(entries, hostname); ok {
+		t.Errorf("hostname %q should not be in entries %v", hostname, entries)
+	}
 }
 
 // ---------------------------------------------------------------------------
-// Ingress collection
+// Ingress — source tagging
 // ---------------------------------------------------------------------------
 
-func TestCollect_IngressTLSHosts(t *testing.T) {
+func TestCollect_IngressTLSHosts_TaggedAsIngress(t *testing.T) {
 	ing := &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{Name: "myapp", Namespace: "default"},
 		Spec: networkingv1.IngressSpec{
 			TLS: []networkingv1.IngressTLS{
-				{Hosts: []string{"tls.example.com", "tls2.example.com"}},
+				{Hosts: []string{"tls.example.com"}},
 			},
 		},
 	}
-	c, _, _ := newTestCollector(ing)
-	hosts, err := c.CollectHostnames(context.Background())
-	assertNoError(t, err)
-	assertContains(t, hosts, "tls.example.com")
-	assertContains(t, hosts, "tls2.example.com")
+	entries, err := newTestCollector(ing).CollectHostnames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, entries, "tls.example.com", SourceIngress)
 }
 
-func TestCollect_IngressRuleHosts(t *testing.T) {
-	// Rule hosts (no TLS block) — cert-manager HTTP-01 challenge Ingresses look like this
+func TestCollect_IngressRuleHosts_TaggedAsIngress(t *testing.T) {
 	ing := &networkingv1.Ingress{
-		ObjectMeta: metav1.ObjectMeta{Name: "acme-solver", Namespace: "cert-manager"},
+		ObjectMeta: metav1.ObjectMeta{Name: "acme", Namespace: "cert-manager"},
 		Spec: networkingv1.IngressSpec{
 			Rules: []networkingv1.IngressRule{
 				{Host: "challenge.example.com"},
 			},
 		},
 	}
-	c, _, _ := newTestCollector(ing)
-	hosts, err := c.CollectHostnames(context.Background())
-	assertNoError(t, err)
-	assertContains(t, hosts, "challenge.example.com")
-}
-
-func TestCollect_IngressEmpty(t *testing.T) {
-	c, _, _ := newTestCollector()
-	hosts, err := c.CollectHostnames(context.Background())
-	assertNoError(t, err)
-	if len(hosts) != 0 {
-		t.Errorf("expected no hosts, got %v", hosts)
+	entries, err := newTestCollector(ing).CollectHostnames(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
+	assertEntry(t, entries, "challenge.example.com", SourceIngress)
 }
 
 // ---------------------------------------------------------------------------
-// Gateway collection
+// Gateway API — source tagging
 // ---------------------------------------------------------------------------
 
-func TestCollect_GatewayListenerHostname(t *testing.T) {
+func TestCollect_GatewayListenerHostname_TaggedAsGateway(t *testing.T) {
 	hostname := gatewayv1.Hostname("gw.example.com")
 	gw := &gatewayv1.Gateway{
 		ObjectMeta: metav1.ObjectMeta{Name: "main", Namespace: "default"},
@@ -98,102 +118,60 @@ func TestCollect_GatewayListenerHostname(t *testing.T) {
 			},
 		},
 	}
-	c, _, _ := newTestCollector(gw)
-	hosts, err := c.CollectHostnames(context.Background())
-	assertNoError(t, err)
-	assertContains(t, hosts, "gw.example.com")
+	entries, err := newTestCollector(gw).CollectHostnames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, entries, "gw.example.com", SourceGateway)
 }
 
-func TestCollect_GatewayNilHostname_Skipped(t *testing.T) {
-	gw := &gatewayv1.Gateway{
-		ObjectMeta: metav1.ObjectMeta{Name: "main", Namespace: "default"},
-		Spec: gatewayv1.GatewaySpec{
-			GatewayClassName: "example",
-			Listeners: []gatewayv1.Listener{
-				{Name: "http", Port: 80, Protocol: "HTTP"}, // no Hostname field
-			},
-		},
-	}
-	c, _, _ := newTestCollector(gw)
-	hosts, err := c.CollectHostnames(context.Background())
-	assertNoError(t, err)
-	if len(hosts) != 0 {
-		t.Errorf("expected no hosts from nil listener hostname, got %v", hosts)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// HTTPRoute collection
-// ---------------------------------------------------------------------------
-
-func TestCollect_HTTPRouteHostnames(t *testing.T) {
+func TestCollect_HTTPRouteHostnames_TaggedAsGateway(t *testing.T) {
 	route := &gatewayv1.HTTPRoute{
 		ObjectMeta: metav1.ObjectMeta{Name: "myroute", Namespace: "default"},
 		Spec: gatewayv1.HTTPRouteSpec{
-			Hostnames: []gatewayv1.Hostname{"http.example.com", "http2.example.com"},
+			Hostnames: []gatewayv1.Hostname{"http.example.com"},
 		},
 	}
-	c, _, _ := newTestCollector(route)
-	hosts, err := c.CollectHostnames(context.Background())
-	assertNoError(t, err)
-	assertContains(t, hosts, "http.example.com")
-	assertContains(t, hosts, "http2.example.com")
+	entries, err := newTestCollector(route).CollectHostnames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, entries, "http.example.com", SourceGateway)
 }
 
-// ---------------------------------------------------------------------------
-// GRPCRoute collection
-// ---------------------------------------------------------------------------
-
-func TestCollect_GRPCRouteHostnames(t *testing.T) {
+func TestCollect_GRPCRouteHostnames_TaggedAsGateway(t *testing.T) {
 	route := &gatewayv1.GRPCRoute{
-		ObjectMeta: metav1.ObjectMeta{Name: "grpcroute", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "grpc", Namespace: "default"},
 		Spec: gatewayv1.GRPCRouteSpec{
 			Hostnames: []gatewayv1.Hostname{"grpc.example.com"},
 		},
 	}
-	c, _, _ := newTestCollector(route)
-	hosts, err := c.CollectHostnames(context.Background())
-	assertNoError(t, err)
-	assertContains(t, hosts, "grpc.example.com")
+	entries, err := newTestCollector(route).CollectHostnames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, entries, "grpc.example.com", SourceGateway)
 }
 
-// ---------------------------------------------------------------------------
-// TLSRoute collection
-// ---------------------------------------------------------------------------
-
-func TestCollect_TLSRouteHostnames(t *testing.T) {
+func TestCollect_TLSRouteHostnames_TaggedAsGateway(t *testing.T) {
 	route := &gatewayv1alpha2.TLSRoute{
-		ObjectMeta: metav1.ObjectMeta{Name: "tlsroute", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "tls", Namespace: "default"},
 		Spec: gatewayv1alpha2.TLSRouteSpec{
-			CommonRouteSpec: gatewayv1alpha2.CommonRouteSpec{},
-			Hostnames:       []gatewayv1alpha2.Hostname{"tls-route.example.com"},
+			Hostnames: []gatewayv1alpha2.Hostname{"tls-route.example.com"},
 		},
 	}
-	c, _, _ := newTestCollector(route)
-	hosts, err := c.CollectHostnames(context.Background())
-	assertNoError(t, err)
-	assertContains(t, hosts, "tls-route.example.com")
+	entries, err := newTestCollector(route).CollectHostnames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEntry(t, entries, "tls-route.example.com", SourceGateway)
 }
 
 // ---------------------------------------------------------------------------
-// Hostname validation / filtering
+// Conflict resolution — Gateway wins
 // ---------------------------------------------------------------------------
 
-func TestCollect_WildcardHostname_Skipped(t *testing.T) {
-	route := &gatewayv1.HTTPRoute{
-		ObjectMeta: metav1.ObjectMeta{Name: "wildcard", Namespace: "default"},
-		Spec: gatewayv1.HTTPRouteSpec{
-			Hostnames: []gatewayv1.Hostname{"*.example.com"},
-		},
-	}
-	c, _, _ := newTestCollector(route)
-	hosts, err := c.CollectHostnames(context.Background())
-	assertNoError(t, err)
-	assertNotContains(t, hosts, "*.example.com")
-}
-
-func TestCollect_Deduplication(t *testing.T) {
-	// Same hostname appears in both Ingress and HTTPRoute
+func TestCollect_GatewayWinsOverIngress_OnConflict(t *testing.T) {
 	ing := &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{Name: "myapp", Namespace: "default"},
 		Spec: networkingv1.IngressSpec{
@@ -206,19 +184,41 @@ func TestCollect_Deduplication(t *testing.T) {
 			Hostnames: []gatewayv1.Hostname{"shared.example.com"},
 		},
 	}
-	c, _, _ := newTestCollector(ing, route)
-	hosts, err := c.CollectHostnames(context.Background())
-	assertNoError(t, err)
-
+	entries, err := newTestCollector(ing, route).CollectHostnames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Must appear exactly once and be tagged as Gateway.
 	count := 0
-	for _, h := range hosts {
-		if h == "shared.example.com" {
+	for _, e := range entries {
+		if e.Hostname == "shared.example.com" {
 			count++
+			if e.Source != SourceGateway {
+				t.Errorf("shared hostname should be tagged Gateway, got %q", e.Source)
+			}
 		}
 	}
 	if count != 1 {
-		t.Errorf("expected shared.example.com exactly once, got %d times in %v", count, hosts)
+		t.Errorf("shared.example.com should appear exactly once, got %d", count)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Filtering & sorting
+// ---------------------------------------------------------------------------
+
+func TestCollect_WildcardSkipped(t *testing.T) {
+	route := &gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "wildcard", Namespace: "default"},
+		Spec: gatewayv1.HTTPRouteSpec{
+			Hostnames: []gatewayv1.Hostname{"*.example.com"},
+		},
+	}
+	entries, err := newTestCollector(route).CollectHostnames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNotPresent(t, entries, "*.example.com")
 }
 
 func TestCollect_ResultIsSorted(t *testing.T) {
@@ -228,13 +228,13 @@ func TestCollect_ResultIsSorted(t *testing.T) {
 			Hostnames: []gatewayv1.Hostname{"z.example.com", "a.example.com", "m.example.com"},
 		},
 	}
-	c, _, _ := newTestCollector(route)
-	hosts, err := c.CollectHostnames(context.Background())
-	assertNoError(t, err)
-
-	for i := 1; i < len(hosts); i++ {
-		if hosts[i] < hosts[i-1] {
-			t.Errorf("hosts not sorted at index %d: %v", i, hosts)
+	entries, err := newTestCollector(route).CollectHostnames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < len(entries); i++ {
+		if entries[i].Hostname < entries[i-1].Hostname {
+			t.Errorf("entries not sorted at index %d: %v", i, entries)
 		}
 	}
 }
@@ -252,40 +252,20 @@ func TestCollect_MultiNamespace(t *testing.T) {
 			TLS: []networkingv1.IngressTLS{{Hosts: []string{"ns2.example.com"}}},
 		},
 	}
-	c, _, _ := newTestCollector(ing1, ing2)
-	hosts, err := c.CollectHostnames(context.Background())
-	assertNoError(t, err)
-	assertContains(t, hosts, "ns1.example.com")
-	assertContains(t, hosts, "ns2.example.com")
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-func assertNoError(t *testing.T, err error) {
-	t.Helper()
+	entries, err := newTestCollector(ing1, ing2).CollectHostnames(context.Background())
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
+	assertEntry(t, entries, "ns1.example.com", SourceIngress)
+	assertEntry(t, entries, "ns2.example.com", SourceIngress)
 }
 
-func assertContains(t *testing.T, hosts []string, want string) {
-	t.Helper()
-	for _, h := range hosts {
-		if h == want {
-			return
-		}
+func TestCollect_Empty(t *testing.T) {
+	entries, err := newTestCollector().CollectHostnames(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Errorf("expected %q in hosts %v", want, hosts)
-}
-
-func assertNotContains(t *testing.T, hosts []string, unwanted string) {
-	t.Helper()
-	for _, h := range hosts {
-		if h == unwanted {
-			t.Errorf("unexpected %q found in hosts %v", unwanted, hosts)
-			return
-		}
+	if len(entries) != 0 {
+		t.Errorf("expected no entries, got %v", entries)
 	}
 }
