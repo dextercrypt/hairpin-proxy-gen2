@@ -1,4 +1,4 @@
-module github.com/user/hairpin-proxy-gen2
+module github.com/dextercrypt/hairpin-proxy-gen2
 
 go 1.22.0
 
