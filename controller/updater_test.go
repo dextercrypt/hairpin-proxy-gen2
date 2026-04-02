@@ -29,7 +29,7 @@ func gatewayEntry(h string) HostnameEntry { return HostnameEntry{Hostname: h, So
 
 func TestCorefileWithRewrites_IngressRoutesToNginxBackend(t *testing.T) {
 	entries := []HostnameEntry{ingressEntry("legacy.example.com")}
-	result := corefileWithRewrites(sampleCorefile, entries)
+	result, _ := corefileWithRewrites(sampleCorefile, entries)
 
 	if !strings.Contains(result, "rewrite name legacy.example.com "+dnsRewriteDestIngress) {
 		t.Errorf("expected ingress rewrite to point to nginx backend, got:\n%s", result)
@@ -38,7 +38,7 @@ func TestCorefileWithRewrites_IngressRoutesToNginxBackend(t *testing.T) {
 
 func TestCorefileWithRewrites_GatewayRoutesToEnvoyBackend(t *testing.T) {
 	entries := []HostnameEntry{gatewayEntry("app.example.com")}
-	result := corefileWithRewrites(sampleCorefile, entries)
+	result, _ := corefileWithRewrites(sampleCorefile, entries)
 
 	if !strings.Contains(result, "rewrite name app.example.com "+dnsRewriteDestGateway) {
 		t.Errorf("expected gateway rewrite to point to envoy backend, got:\n%s", result)
@@ -50,7 +50,7 @@ func TestCorefileWithRewrites_BothSourcesInSameCorefile(t *testing.T) {
 		ingressEntry("legacy.example.com"),
 		gatewayEntry("app.example.com"),
 	}
-	result := corefileWithRewrites(sampleCorefile, entries)
+	result, _ := corefileWithRewrites(sampleCorefile, entries)
 
 	if !strings.Contains(result, "rewrite name legacy.example.com "+dnsRewriteDestIngress) {
 		t.Errorf("ingress rewrite missing or wrong backend:\n%s", result)
@@ -65,7 +65,7 @@ func TestCorefileWithRewrites_InjectsAfterBlock(t *testing.T) {
 		ingressEntry("api.example.com"),
 		gatewayEntry("app.example.com"),
 	}
-	result := corefileWithRewrites(sampleCorefile, entries)
+	result, _ := corefileWithRewrites(sampleCorefile, entries)
 
 	lines := strings.Split(result, "\n")
 	for i, line := range lines {
@@ -84,8 +84,8 @@ func TestCorefileWithRewrites_InjectsAfterBlock(t *testing.T) {
 
 func TestCorefileWithRewrites_Idempotent(t *testing.T) {
 	entries := []HostnameEntry{ingressEntry("legacy.example.com"), gatewayEntry("app.example.com")}
-	first := corefileWithRewrites(sampleCorefile, entries)
-	second := corefileWithRewrites(first, entries)
+	first, _ := corefileWithRewrites(sampleCorefile, entries)
+	second, _ := corefileWithRewrites(first, entries)
 
 	if strings.TrimSpace(first) != strings.TrimSpace(second) {
 		t.Errorf("not idempotent:\nfirst:\n%s\n\nsecond:\n%s", first, second)
@@ -93,8 +93,8 @@ func TestCorefileWithRewrites_Idempotent(t *testing.T) {
 }
 
 func TestCorefileWithRewrites_ReplacesOnChange(t *testing.T) {
-	first := corefileWithRewrites(sampleCorefile, []HostnameEntry{ingressEntry("old.example.com")})
-	second := corefileWithRewrites(first, []HostnameEntry{ingressEntry("new.example.com")})
+	first, _ := corefileWithRewrites(sampleCorefile, []HostnameEntry{ingressEntry("old.example.com")})
+	second, _ := corefileWithRewrites(first, []HostnameEntry{ingressEntry("new.example.com")})
 
 	if strings.Contains(second, "old.example.com") {
 		t.Error("stale rewrite for old.example.com still present")
@@ -105,8 +105,8 @@ func TestCorefileWithRewrites_ReplacesOnChange(t *testing.T) {
 }
 
 func TestCorefileWithRewrites_EmptyEntriesRemovesRewrites(t *testing.T) {
-	withRewrites := corefileWithRewrites(sampleCorefile, []HostnameEntry{ingressEntry("app.example.com")})
-	cleared := corefileWithRewrites(withRewrites, []HostnameEntry{})
+	withRewrites, _ := corefileWithRewrites(sampleCorefile, []HostnameEntry{ingressEntry("app.example.com")})
+	cleared, _ := corefileWithRewrites(withRewrites, []HostnameEntry{})
 
 	if strings.Contains(cleared, commentSuffix) {
 		t.Error("managed lines still present after clearing entries")
@@ -118,15 +118,18 @@ func TestCorefileWithRewrites_MissingBlock_ReturnsUnchanged(t *testing.T) {
     errors
     health`
 
-	result := corefileWithRewrites(malformed, []HostnameEntry{ingressEntry("app.example.com")})
+	result, injected := corefileWithRewrites(malformed, []HostnameEntry{ingressEntry("app.example.com")})
 
+	if injected {
+		t.Error("expected injected=false for malformed Corefile")
+	}
 	if strings.Contains(result, "rewrite name") {
 		t.Error("injected rewrite into malformed Corefile with no .:53 { block")
 	}
 }
 
 func TestCorefileWithRewrites_CommentSuffix(t *testing.T) {
-	result := corefileWithRewrites(sampleCorefile, []HostnameEntry{ingressEntry("app.example.com")})
+	result, _ := corefileWithRewrites(sampleCorefile, []HostnameEntry{ingressEntry("app.example.com")})
 
 	for _, line := range strings.Split(result, "\n") {
 		if strings.Contains(line, "rewrite name") {

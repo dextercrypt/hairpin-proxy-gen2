@@ -25,7 +25,7 @@ func main() {
 
 	mode, err := ParseMode(*modeFlag)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid --mode %q: must be envoy, nginx, or both\n", *modeFlag)
+		fmt.Fprintf(os.Stderr, "invalid --mode %q: must be gateway, ingress, or both\n", *modeFlag)
 		os.Exit(1)
 	}
 

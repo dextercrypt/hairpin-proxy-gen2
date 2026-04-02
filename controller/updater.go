@@ -54,7 +54,12 @@ func (u *CoreDNSUpdater) Update(ctx context.Context, entries []HostnameEntry) er
 	}
 
 	oldCorefile := cm.Data[corednsConfigMapKey]
-	newCorefile := corefileWithRewrites(oldCorefile, entries)
+	newCorefile, injected := corefileWithRewrites(oldCorefile, entries)
+
+	if !injected && len(entries) > 0 {
+		u.logger.Warn("CoreDNS Corefile is missing '.:53 {' block — hairpin rewrites were NOT injected; check your CoreDNS configuration")
+		return nil
+	}
 
 	if strings.TrimSpace(oldCorefile) == strings.TrimSpace(newCorefile) {
 		u.logger.Info("CoreDNS Corefile is already up-to-date, no changes needed")
@@ -74,7 +79,7 @@ func (u *CoreDNSUpdater) Update(ctx context.Context, entries []HostnameEntry) er
 // injected immediately after the `.:53 {` server block opener.
 // Each entry is routed to the correct HAProxy backend based on its Source.
 // The transformation is idempotent: existing managed lines are removed first.
-func corefileWithRewrites(original string, entries []HostnameEntry) string {
+func corefileWithRewrites(original string, entries []HostnameEntry) (string, bool) {
 	lines := strings.Split(strings.TrimSpace(original), "\n")
 
 	// Strip any lines we previously added.
@@ -108,13 +113,10 @@ func corefileWithRewrites(original string, entries []HostnameEntry) string {
 	}
 
 	if !injected && len(rewrites) > 0 {
-		// Corefile is malformed or uses a non-standard structure; don't silently
-		// produce a broken config — return the filtered original unchanged so the
-		// caller's diff-check skips the update, and the error surfaces in logs.
-		return strings.Join(filtered, "\n")
+		return strings.Join(filtered, "\n"), false
 	}
 
-	return strings.Join(result, "\n")
+	return strings.Join(result, "\n"), true
 }
 
 // ---------------------------------------------------------------------------
