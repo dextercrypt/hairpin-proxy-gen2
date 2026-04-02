@@ -66,7 +66,7 @@ confirm() {
   local msg=$1
   echo ""
   echo -e -n "  ${BOLD_YELLOW}?${RESET}  ${BOLD_WHITE}${msg}${RESET} ${DIM}[y/N]${RESET}: "
-  read -r REPLY
+  read -r REPLY < /dev/tty
   echo ""
   if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
     echo -e "  ${BOLD_RED}✘  Aborted.${RESET}"
@@ -107,7 +107,7 @@ echo -e "  ${BOLD_WHITE}  2)${RESET} ${CYAN}ingress${RESET}  ${DIM}— Ingress o
 echo -e "  ${BOLD_WHITE}  3)${RESET} ${CYAN}both${RESET}     ${DIM}— Dual-stack         (all resources, routed to correct backend by source)${RESET}"
 echo ""
 echo -e -n "  ${BOLD_WHITE}Select mode${RESET} ${DIM}[1/2/3, default: 3]${RESET}${BOLD_WHITE}: ${RESET}"
-read -r MODE_INPUT
+read -r MODE_INPUT < /dev/tty
 
 case "$MODE_INPUT" in
   1) MODE="gateway" ;;
@@ -139,7 +139,7 @@ if [[ "$MODE" == "gateway" || "$MODE" == "both" ]]; then
   echo -e "  ${DIM}    Cilium         →  ${CYAN}cilium-gateway.kube-system.svc.cluster.local${RESET}"
   echo ""
   echo -e -n "  ${BOLD_WHITE}Gateway API Target${RESET} ${DIM}[default: ${CYAN}${DEFAULT_GATEWAY_TARGET}${RESET}${DIM}]${RESET}${BOLD_WHITE}: ${RESET}"
-  read -r GATEWAY_INPUT
+  read -r GATEWAY_INPUT < /dev/tty
   GATEWAY_TARGET="${GATEWAY_INPUT:-$DEFAULT_GATEWAY_TARGET}"
   echo -e "\n  ${GREEN}✔${RESET}  Gateway target: ${CYAN}${GATEWAY_TARGET}${RESET}"
   echo ""
@@ -156,7 +156,7 @@ if [[ "$MODE" == "ingress" || "$MODE" == "both" ]]; then
   echo -e "  ${DIM}    Kong           →  ${CYAN}kong-proxy.kong.svc.cluster.local${RESET}"
   echo ""
   echo -e -n "  ${BOLD_WHITE}Ingress Target${RESET} ${DIM}[default: ${CYAN}${DEFAULT_INGRESS_TARGET}${RESET}${DIM}]${RESET}${BOLD_WHITE}: ${RESET}"
-  read -r INGRESS_INPUT
+  read -r INGRESS_INPUT < /dev/tty
   INGRESS_TARGET="${INGRESS_INPUT:-$DEFAULT_INGRESS_TARGET}"
   echo -e "\n  ${GREEN}✔${RESET}  Ingress target: ${CYAN}${INGRESS_TARGET}${RESET}"
   echo ""
