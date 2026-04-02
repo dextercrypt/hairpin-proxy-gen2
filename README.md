@@ -228,7 +228,6 @@ ls ~/.hairpin-proxy-gen2/backups/
 |------|---------|-------------|
 | `--mode` | `both` | Which resources to watch: `gateway`, `ingress`, or `both` |
 | `--poll-interval` | `15s` | How often the controller polls Kubernetes resources |
-| `--etc-hosts` | _(unset)_ | Path to a writable `/etc/hosts` file; enables node-level rewriting (DaemonSet mode) |
 
 ---
 
