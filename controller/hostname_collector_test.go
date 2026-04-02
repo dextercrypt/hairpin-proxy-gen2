@@ -278,7 +278,7 @@ func TestCollect_Empty(t *testing.T) {
 // Mode filtering
 // ---------------------------------------------------------------------------
 
-func TestCollect_ModeEnvoy_SkipsIngress(t *testing.T) {
+func TestCollect_ModeGateway_SkipsIngress(t *testing.T) {
 	ing := &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{Name: "myapp", Namespace: "default"},
 		Spec: networkingv1.IngressSpec{
@@ -291,7 +291,7 @@ func TestCollect_ModeEnvoy_SkipsIngress(t *testing.T) {
 			Hostnames: []gatewayv1.Hostname{"app.example.com"},
 		},
 	}
-	entries, err := newTestCollectorWithMode(ModeEnvoy, ing, route).CollectHostnames(context.Background())
+	entries, err := newTestCollectorWithMode(ModeGateway, ing, route).CollectHostnames(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestCollect_ModeEnvoy_SkipsIngress(t *testing.T) {
 	assertEntry(t, entries, "app.example.com", SourceGateway)
 }
 
-func TestCollect_ModeNginx_SkipsGatewayAPI(t *testing.T) {
+func TestCollect_ModeIngress_SkipsGatewayAPI(t *testing.T) {
 	ing := &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{Name: "myapp", Namespace: "default"},
 		Spec: networkingv1.IngressSpec{
@@ -312,7 +312,7 @@ func TestCollect_ModeNginx_SkipsGatewayAPI(t *testing.T) {
 			Hostnames: []gatewayv1.Hostname{"app.example.com"},
 		},
 	}
-	entries, err := newTestCollectorWithMode(ModeNginx, ing, route).CollectHostnames(context.Background())
+	entries, err := newTestCollectorWithMode(ModeIngress, ing, route).CollectHostnames(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,8 +343,8 @@ func TestCollect_ModeBoth_CollectsAll(t *testing.T) {
 
 func TestParseMode_Valid(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
-		{"envoy", "envoy"},
-		{"nginx", "nginx"},
+		{"gateway", "gateway"},
+		{"ingress", "ingress"},
 		{"both", "both"},
 	} {
 		m, err := ParseMode(tc.in)

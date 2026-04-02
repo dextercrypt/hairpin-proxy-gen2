@@ -29,15 +29,15 @@ const (
 type Mode string
 
 const (
-	ModeEnvoy Mode = "envoy" // Gateway API resources only → haproxy-envoy
-	ModeNginx Mode = "nginx" // Ingress resources only    → haproxy-nginx
-	ModeBoth  Mode = "both"  // All resources             → routed by source
+	ModeGateway Mode = "gateway" // Gateway API resources only → haproxy-envoy
+	ModeIngress Mode = "ingress" // Ingress resources only    → haproxy-nginx
+	ModeBoth    Mode = "both"    // All resources             → routed by source
 )
 
 // ParseMode validates and returns a Mode from a string.
 func ParseMode(s string) (Mode, error) {
 	switch Mode(s) {
-	case ModeEnvoy, ModeNginx, ModeBoth:
+	case ModeGateway, ModeIngress, ModeBoth:
 		return Mode(s), nil
 	default:
 		return "", fmt.Errorf("unknown mode %q", s)
@@ -70,13 +70,13 @@ func (c *HostnameCollector) CollectHostnames(ctx context.Context) ([]HostnameEnt
 	hostMap := make(map[string]Source)
 
 	// Ingress collected first — Gateway API will overwrite on conflict (Gateway wins).
-	if c.mode == ModeNginx || c.mode == ModeBoth {
+	if c.mode == ModeIngress || c.mode == ModeBoth {
 		if err := c.collectFromIngress(ctx, hostMap); err != nil {
 			c.logger.Warn("Could not list Ingress resources (skipping)", zap.Error(err))
 		}
 	}
 
-	if c.mode == ModeEnvoy || c.mode == ModeBoth {
+	if c.mode == ModeGateway || c.mode == ModeBoth {
 		if err := c.collectFromGateways(ctx, hostMap); err != nil {
 			c.logger.Warn("Could not list Gateway resources (CRD may not be installed, skipping)", zap.Error(err))
 		}

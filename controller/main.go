@@ -19,7 +19,7 @@ func main() {
 	var (
 		pollInterval = flag.Duration("poll-interval", 15*time.Second, "How often to poll Kubernetes resources")
 		etchostsPath = flag.String("etc-hosts", "", "Path to writable /etc/hosts file (enables DaemonSet/node mode)")
-		modeFlag     = flag.String("mode", "both", "Which resources to watch: envoy (Gateway API only), nginx (Ingress only), both")
+		modeFlag     = flag.String("mode", "both", "Which resources to watch: gateway (Gateway API only), ingress (Ingress only), both")
 	)
 	flag.Parse()
 
