@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
         - name: haproxy
-          image: dextercrypt/hairpin-proxy-gen2-haproxy:v0.0.1
+          image: dextercrypt/hairpin-proxy-gen2-haproxy:v0.1.0
           env:
             - name: TARGET_SERVER
               value: envoy-gateway.envoy-gateway-system.svc.cluster.local
@@ -101,7 +101,7 @@ spec:
     spec:
       containers:
         - name: haproxy
-          image: dextercrypt/hairpin-proxy-gen2-haproxy:v0.0.1
+          image: dextercrypt/hairpin-proxy-gen2-haproxy:v0.1.0
           env:
             - name: TARGET_SERVER
               value: ingress-nginx-controller.ingress-nginx.svc.cluster.local
@@ -259,7 +259,7 @@ spec:
         runAsGroup: 65534
       containers:
         - name: controller
-          image: dextercrypt/hairpin-proxy-gen2-controller:v0.0.1
+          image: dextercrypt/hairpin-proxy-gen2-controller:v0.1.0
           args:
             - --poll-interval=15s
             - --mode=both
