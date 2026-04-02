@@ -133,10 +133,10 @@ The installer will:
 1. Check for `kubectl` and `curl`
 2. Ask which mode to use (`gateway`, `ingress`, or `both`)
 3. Ask for your ingress/gateway controller service address (with sensible defaults)
-4. Download and patch the correct manifest
+4. Download and patch the correct manifest, saved to `~/.hairpin-proxy-gen2/`
 5. Show a summary before applying
 6. **Back up your CoreDNS ConfigMap** to `~/.hairpin-proxy-gen2/backups/` before making any changes
-7. Apply to your cluster
+7. Apply to your cluster and show the uninstall command
 
 ### Manual installation
 
@@ -187,19 +187,38 @@ rewrite name api.example.com haproxy-ingress.hairpin-proxy-gen2.svc.cluster.loca
 
 ## Uninstalling
 
+If you used the interactive installer, it saved the applied manifest and a CoreDNS backup to `~/.hairpin-proxy-gen2/`:
+
 ```bash
-# Remove the hairpin-proxy-gen2 namespace and all its resources
-kubectl delete namespace hairpin-proxy-gen2
+# Uninstall using the saved manifest
+kubectl delete -f ~/.hairpin-proxy-gen2/install-<mode>-<timestamp>.yaml
 
-# Remove RBAC
-kubectl delete clusterrole hairpin-proxy-gen2
-kubectl delete clusterrolebinding hairpin-proxy-gen2
-
-# Restore CoreDNS from backup (the installer saved one at ~/.hairpin-proxy-gen2/backups/)
+# Restore CoreDNS from backup
 kubectl apply -f ~/.hairpin-proxy-gen2/backups/coredns-backup-<timestamp>.yaml
 ```
 
-The controller removes its own managed lines from CoreDNS on the next reconciliation after the namespace is deleted. If you want to force-clean CoreDNS immediately, restore from the backup file saved during installation.
+If you installed manually with `kubectl apply -f`:
+
+```bash
+# Remove namespace and all resources
+kubectl delete namespace hairpin-proxy-gen2
+
+# Remove cluster-scoped RBAC
+kubectl delete clusterrole hairpin-proxy-gen2
+kubectl delete clusterrolebinding hairpin-proxy-gen2
+kubectl delete role hairpin-proxy-gen2-coredns -n kube-system
+kubectl delete rolebinding hairpin-proxy-gen2-coredns -n kube-system
+
+# Restore CoreDNS from backup
+kubectl apply -f ~/.hairpin-proxy-gen2/backups/coredns-backup-<timestamp>.yaml
+```
+
+List your saved files at any time:
+
+```bash
+ls ~/.hairpin-proxy-gen2/
+ls ~/.hairpin-proxy-gen2/backups/
+```
 
 ---
 
