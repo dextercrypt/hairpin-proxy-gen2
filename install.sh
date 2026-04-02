@@ -169,6 +169,8 @@ confirm "Targets configured — proceed to download?"
 # ---------------------------------------------------------------------------
 BASE_URL="https://raw.githubusercontent.com/dextercrypt/hairpin-proxy-gen2/main"
 MANIFEST_URL="${BASE_URL}/install-${MODE}.yaml"
+INSTALL_DIR="$HOME/.hairpin-proxy-gen2"
+MANIFEST_SAVE="${INSTALL_DIR}/install-${MODE}-$(date +%Y%m%d-%H%M%S).yaml"
 TMP_FILE="$(mktemp /tmp/hairpin-proxy-gen2-XXXXXX.yaml)"
 
 echo -e "  ${BOLD_YELLOW}❯ Step 4 — Downloading manifest${RESET}"
@@ -186,6 +188,10 @@ if [[ -n "$INGRESS_TARGET" ]]; then
 fi
 rm -f "${TMP_FILE}.bak"
 
+# Save a copy of the patched manifest for future uninstall
+mkdir -p "$INSTALL_DIR"
+cp "$TMP_FILE" "$MANIFEST_SAVE"
+
 confirm "Manifest downloaded and patched — proceed to review summary?"
 
 # ---------------------------------------------------------------------------
@@ -195,16 +201,17 @@ echo -e "  ${BOLD_YELLOW}❯ Step 5 — Summary${RESET}"
 echo ""
 echo -e "  ${DIM}  Namespace   :${RESET}  ${WHITE}hairpin-proxy-gen2${RESET}"
 echo -e "  ${DIM}  Mode        :${RESET}  ${CYAN}${MODE}${RESET}"
-echo -e "  ${DIM}  Controller  :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-controller:v0.0.1${RESET}"
+echo -e "  ${DIM}  Controller  :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-controller:v1.0.0${RESET}"
 
 if [[ "$MODE" == "gateway" || "$MODE" == "both" ]]; then
-  echo -e "  ${DIM}  HAProxy (Gateway API) :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-haproxy:v0.0.1${RESET}"
+  echo -e "  ${DIM}  HAProxy (Gateway API) :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-haproxy:v1.0.0${RESET}"
   echo -e "  ${DIM}  Gateway target        :${RESET}  ${CYAN}${GATEWAY_TARGET}${RESET}"
 fi
 if [[ "$MODE" == "ingress" || "$MODE" == "both" ]]; then
-  echo -e "  ${DIM}  HAProxy (Ingress)     :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-haproxy:v0.0.1${RESET}"
+  echo -e "  ${DIM}  HAProxy (Ingress)     :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-haproxy:v1.0.0${RESET}"
   echo -e "  ${DIM}  Ingress target        :${RESET}  ${CYAN}${INGRESS_TARGET}${RESET}"
 fi
+echo -e "  ${DIM}  Manifest saved to     :${RESET}  ${CYAN}${MANIFEST_SAVE}${RESET}"
 echo ""
 
 confirm "Everything looks good — apply to cluster now?"
@@ -241,6 +248,9 @@ kubectl apply -f "$TMP_FILE" &
 spinner $! "Applying manifest to Kubernetes..."
 
 rm -f "$TMP_FILE"
+
+echo -e "  ${DIM}  Manifest saved to:${RESET}  ${CYAN}${MANIFEST_SAVE}${RESET}"
+echo -e "  ${DIM}  Uninstall with:${RESET}    ${CYAN}kubectl delete -f ${MANIFEST_SAVE}${RESET}"
 
 echo ""
 echo -e "  ${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
