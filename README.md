@@ -100,7 +100,7 @@ The controller injects `rewrite name` directives into the CoreDNS Corefile, imme
 }
 ```
 
-Each hostname is routed to the correct HAProxy backend based on which resource type it came from. The update is **idempotent** — managed lines are stripped and re-injected on every reconciliation cycle.
+Each hostname is routed to the correct HAProxy backend based on which resource type it came from.
 
 ### Gateway API Priority
 
