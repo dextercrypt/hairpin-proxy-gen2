@@ -210,9 +210,31 @@ echo ""
 confirm "Everything looks good — apply to cluster now?"
 
 # ---------------------------------------------------------------------------
-# Step 6 — Apply
+# Step 6 — Backup CoreDNS ConfigMap
 # ---------------------------------------------------------------------------
-echo -e "  ${BOLD_YELLOW}❯ Step 6 — Applying to cluster${RESET}"
+BACKUP_DIR="$HOME/.hairpin-proxy-gen2/backups"
+BACKUP_FILE="${BACKUP_DIR}/coredns-backup-$(date +%Y%m%d-%H%M%S).yaml"
+
+echo -e "  ${BOLD_YELLOW}❯ Step 6 — Backing up CoreDNS ConfigMap${RESET}"
+echo ""
+
+mkdir -p "$BACKUP_DIR"
+
+if kubectl get configmap coredns -n kube-system &>/dev/null; then
+  kubectl get configmap coredns -n kube-system -o yaml > "$BACKUP_FILE" &
+  spinner $! "Saving CoreDNS backup..."
+  echo -e "  ${DIM}  Backup saved to:${RESET} ${CYAN}${BACKUP_FILE}${RESET}"
+  echo -e "  ${DIM}  Restore with:${RESET}   ${CYAN}kubectl apply -f ${BACKUP_FILE}${RESET}"
+else
+  echo -e "  ${YELLOW}⚠${RESET}  CoreDNS ConfigMap not found — skipping backup"
+fi
+
+confirm "Backup done — proceed to apply?"
+
+# ---------------------------------------------------------------------------
+# Step 7 — Apply
+# ---------------------------------------------------------------------------
+echo -e "  ${BOLD_YELLOW}❯ Step 7 — Applying to cluster${RESET}"
 echo ""
 
 kubectl apply -f "$TMP_FILE" &
@@ -227,4 +249,7 @@ echo -e "  ${DIM}━━━━━━━━━━━━━━━━━━━━━
 echo ""
 echo -e "  ${DIM}  Check status:${RESET}"
 echo -e "  ${CYAN}  kubectl get all -n hairpin-proxy-gen2${RESET}"
+echo ""
+echo -e "  ${DIM}  Restore CoreDNS if needed:${RESET}"
+echo -e "  ${CYAN}  kubectl apply -f ${BACKUP_FILE}${RESET}"
 echo ""
