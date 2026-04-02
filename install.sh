@@ -204,11 +204,11 @@ echo -e "  ${DIM}  Mode        :${RESET}  ${CYAN}${MODE}${RESET}"
 echo -e "  ${DIM}  Controller  :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-controller:v1.0.1${RESET}"
 
 if [[ "$MODE" == "gateway" || "$MODE" == "both" ]]; then
-  echo -e "  ${DIM}  HAProxy (Gateway API) :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-haproxy:v1.0.2${RESET}"
+  echo -e "  ${DIM}  HAProxy (Gateway API) :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-haproxy:v1.0.3${RESET}"
   echo -e "  ${DIM}  Gateway target        :${RESET}  ${CYAN}${GATEWAY_TARGET}${RESET}"
 fi
 if [[ "$MODE" == "ingress" || "$MODE" == "both" ]]; then
-  echo -e "  ${DIM}  HAProxy (Ingress)     :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-haproxy:v1.0.2${RESET}"
+  echo -e "  ${DIM}  HAProxy (Ingress)     :${RESET}  ${WHITE}dextercrypt/hairpin-proxy-gen2-haproxy:v1.0.3${RESET}"
   echo -e "  ${DIM}  Ingress target        :${RESET}  ${CYAN}${INGRESS_TARGET}${RESET}"
 fi
 echo -e "  ${DIM}  Manifest saved to     :${RESET}  ${CYAN}${MANIFEST_SAVE}${RESET}"
