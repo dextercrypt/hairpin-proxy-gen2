@@ -123,7 +123,9 @@ If the same hostname appears in both an Ingress and a Gateway API resource, Gate
 ### Interactive installer (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dextercrypt/hairpin-proxy-gen2/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dextercrypt/hairpin-proxy-gen2/main/install.sh -o install.sh
+chmod +x install.sh
+./install.sh
 ```
 
 The installer will:
