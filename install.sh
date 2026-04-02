@@ -228,8 +228,8 @@ echo ""
 mkdir -p "$BACKUP_DIR"
 
 if kubectl get configmap coredns -n kube-system &>/dev/null; then
-  kubectl get configmap coredns -n kube-system -o yaml > "$BACKUP_FILE" &
-  spinner $! "Saving CoreDNS backup..."
+  kubectl get configmap coredns -n kube-system -o yaml > "$BACKUP_FILE"
+  echo -e "  ${BOLD_GREEN}✔${RESET}  CoreDNS backup saved"
   echo -e "  ${DIM}  Backup saved to:${RESET} ${CYAN}${BACKUP_FILE}${RESET}"
   echo -e "  ${DIM}  Restore with:${RESET}   ${CYAN}kubectl apply -f ${BACKUP_FILE}${RESET}"
 else
@@ -244,8 +244,8 @@ confirm "Backup done — proceed to apply?"
 echo -e "  ${BOLD_YELLOW}❯ Step 7 — Applying to cluster${RESET}"
 echo ""
 
-kubectl apply -f "$TMP_FILE" &
-spinner $! "Applying manifest to Kubernetes..."
+kubectl apply -f "$TMP_FILE"
+echo -e "  ${BOLD_GREEN}✔${RESET}  Manifest applied"
 
 rm -f "$TMP_FILE"
 
